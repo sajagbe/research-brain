@@ -5,10 +5,11 @@ Portable, harness-agnostic research organization, knowledge management, Lamport 
 ## Architecture
 
 - **`AGENTS.md`**: Ultra-lean (~30 lines) core invariants, 50% context ceiling, personal conventions, and skill pointers synced across harnesses.
-- **5 Focused Skills (`skills/`)**:
+- **6 Focused Skills (`skills/`)**:
   - `rb-proof` *(model-invoked)* — Lamport hierarchical proof decomposition (`1.`, `1.1.`, `1.1.1.`), bounded recursive zero-context adversarial review (depth 3, 2 reviewers, max 3 rounds), and external formalization gate.
   - `rb-km` *(model-invoked)* — Librarian (`library/`), Wiki ground truth (`wiki/`), Project Notebook (`projects/<slug>/notebook/`), and append-only Worklogs (`projects/<slug>/worklogs/`).
   - `rb-cite` *(model-invoked)* — Verbatim quote-before-acting protocol (`[@source-id, p.X, L.Y]`), deterministic `rb verify-quotes`, and non-destructive human-confirmed highlights (`rb highlight --confirmed`).
+  - `rb-explain` *(model-invoked)* — Intuition-first theory/math explanations, real-space-to-matrix bridges, and mandatory colored LaTeX equation annotations in all documents (`\color` + `\underbrace`/`\overbrace` or `annotate-equations` `\eqnmarkbox`/`\annotate`).
   - `rb-garden` *(user-invoked)* — Scoped sub-area Gardener pass honoring `GARDEN_POLICY.md` (`ask-first` until explicitly promoted to `converged`).
   - `rb-project` *(user-invoked)* — Bootstrap a sandboxed project repo, notebook, worklog, vault pointer, and git pre-commit hooks.
 - **Deterministic CLI (`rb`) + Git Hooks**: Runs completely outside model control. Verifies verbatim quotes against immutable Library originals (PDF via PyMuPDF and text/Markdown/code via line ranges), checks Wiki verification headers and Gardener policies, and blocks invalid commits via `git` pre-commit hooks.

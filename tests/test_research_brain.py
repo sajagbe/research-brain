@@ -141,3 +141,31 @@ def test_git_pre_commit_hook_blocks_fabricated_quote(tmp_path: Path, monkeypatch
     )
     assert proc.returncode == 1
     assert "hallucinated quote" not in proc.stderr or "Verbatim quote not found" in proc.stderr
+
+
+def test_lint_enforces_colored_latex_equation_annotations(tmp_path: Path) -> None:
+    vault = init_vault(tmp_path / "vault")
+    src = tmp_path / "eq.txt"
+    src.write_text("linear response equals trace of density and operator\n", encoding="utf-8")
+    ingest_source(vault, src, source_id="eqsrc", area="general")
+
+    # Uncolored display equation in wiki/ must raise an error
+    uncolored = vault / "wiki" / "general" / "uncolored.md"
+    uncolored.write_text(
+        "---\nstatus: verified\n---\n\n"
+        '> "linear response equals trace of density and operator" [@eqsrc, L.1]\n\n'
+        "$$\nT_p = -\\operatorname{Tr}(D_0 h_p)\n$$\n",
+        encoding="utf-8",
+    )
+    errors = [i for i in lint_vault(vault, target_files=[uncolored]) if i.severity == "error"]
+    assert any("colored LaTeX annotation" in e.message for e in errors)
+
+    # Colored display equation passes cleanly
+    colored = vault / "wiki" / "general" / "colored.md"
+    colored.write_text(
+        "---\nstatus: verified\n---\n\n"
+        '> "linear response equals trace of density and operator" [@eqsrc, L.1]\n\n'
+        "$$\n\\color{#1B3A5C}{\\underbrace{T_p}_{\\text{linear rate}}} = -\\color{#C87D14}{\\operatorname{Tr}}(\\color{#00798C}{D_0}\\,\\color{#D1495B}{h_p})\n$$\n",
+        encoding="utf-8",
+    )
+    assert [i for i in lint_vault(vault, target_files=[colored]) if i.severity == "error"] == []

@@ -15,6 +15,11 @@ from research_brain.library import load_catalog, save_catalog
 WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]")
 GARDEN_STATUS_RE = re.compile(r"^status:\s*(ask-first|converged)\s*$", re.MULTILINE)
 VERIFIED_STATUS_RE = re.compile(r"^status:\s*verified\s*$", re.MULTILINE)
+DISPLAY_MATH_RE = re.compile(
+    r"(\$\$(?P<dollar>.+?)\$\$|\\begin\{(?:equation|align)\*?\}(?P<env>.+?)\\end\{(?:equation|align)\*?\})",
+    re.DOTALL,
+)
+COLOR_ANNOT_RE = re.compile(r"\\(?:color|textcolor|eqnmarkbox|eqnmark)\b")
 
 PRE_COMMIT_SCRIPT = """#!/bin/sh
 # Managed by Research Brain (rb) — deterministic out-of-model verification hook.
@@ -344,5 +349,19 @@ def lint_vault(vault_path: Path, target_files: list[Path] | None = None) -> list
                     issues.append(
                         LintIssue(md, "warn", f"Unresolved wikilink [[{target}]] in vault.")
                     )
+
+        # 5. Colored LaTeX annotation check on displayed equations (outside fenced code blocks)
+        stripped_code = re.sub(r"(?ms)^```.*?^```|^~~~.*?^~~~", "", content)
+        for idx, m in enumerate(DISPLAY_MATH_RE.finditer(stripped_code), start=1):
+            eq_body = m.group("dollar") or m.group("env") or ""
+            if eq_body.strip() and not COLOR_ANNOT_RE.search(eq_body):
+                sev = "error" if (in_vault and len(rel.parts) >= 2 and rel.parts[0] == "wiki") else "warn"
+                issues.append(
+                    LintIssue(
+                        md,
+                        sev,
+                        f"Display equation #{idx} lacks colored LaTeX annotation (\\color / \\textcolor / \\eqnmarkbox); see rb-explain.",
+                    )
+                )
 
     return issues
