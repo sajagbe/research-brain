@@ -40,7 +40,7 @@ rb ingest paper.pdf --id lamport2012 --area proofs            # Catalog immutabl
 rb verify-quotes --staged                                     # Deterministically verify verbatim quotes
 rb highlight lamport2012 --page 2 --quote "..." --confirmed   # Non-destructive PDF + MD highlight
 rb log my-study --kind exp --text "Baseline converged."       # Append chronological worklog entry
-rb lint                                                       # Full vault integrity check
+rb lint                                                       # Full vault integrity check (quotes, colors, ref table, acronyms, provenance)
 rb garden status                                              # Show ask-first / converged sub-areas
 rb garden converge wiki/general --approved                    # Promote sub-area after human approval
 ```

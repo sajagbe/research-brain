@@ -19,7 +19,34 @@ DISPLAY_MATH_RE = re.compile(
     r"(\$\$(?P<dollar>.+?)\$\$|\\begin\{(?:equation|align)\*?\}(?P<env>.+?)\\end\{(?:equation|align)\*?\})",
     re.DOTALL,
 )
+INLINE_MATH_RE = re.compile(r"(?<!\$)\$(?!\$)([^$\n]*?[A-Za-z\\][^$\n]*?)(?<!\$)\$(?!\$)")
 COLOR_ANNOT_RE = re.compile(r"\\(?:color|textcolor|eqnmarkbox|eqnmark)\b")
+GLOSSARY_HEADING_RE = re.compile(
+    r"^#{1,3}\s+(?:(?:Master\s+)?(?:Symbol|Term|Symbol\s*&\s*Term)\s+(?:Glossary|Reference)|Reference\s+Table)\b",
+    re.MULTILINE | re.IGNORECASE,
+)
+GLOSSARY_BLOCK_RE = re.compile(
+    r"(?m)^#{1,3}\s+(?:(?:Master\s+)?(?:Symbol|Term|Symbol\s*&\s*Term)\s+(?:Glossary|Reference)|Reference\s+Table)\b[^\n]*\n(?:[ \t]*\n)*(?:[ \t]*\|[^\n]*\n?)+",
+    re.IGNORECASE,
+)
+ACRONYM_RE = re.compile(r"\b([A-Z]{3,8})\b")
+COMMON_NON_DOMAIN_ACRONYMS = frozenset({
+    "PDF", "URL", "CLI", "API", "UTC", "JSON", "HTML", "YAML", "TOML", "SHA",
+    "CSV", "TSV", "SVG", "PNG", "XML", "HTTP", "HTTPS", "SSH", "VCS", "GIT",
+    "README", "INDEX", "TODO", "NOTE", "PASS", "FAIL", "WARN", "ERROR", "INFO",
+    "UNVERIFIED", "AND", "NOT", "THE", "ALL", "ANY", "FOR", "USE", "DOI",
+    "USA", "USD", "MIT", "QED", "LLM", "LLMS", "MCP",
+})
+PROVENANCE_TAG_RE = re.compile(
+    r"\[@[a-z0-9][a-z0-9._-]{1,80}[^\]]*\]|\[(?:calc|worklog):\s*[^\]]+\]|\[(?:example|UNVERIFIED)\]",
+    re.IGNORECASE,
+)
+QUANT_CLAIM_RE = re.compile(
+    r"(?:\b\d+(?:\.\d+)?\s*(?:×|x|\\times)\s*10\^?\{?-?\d+\}?|\b\d+(?:\.\d+)?e[+-]?\d+\b|"
+    r"[<>≤≥≈]?\s*\d+(?:\.\d+)?\s*%|"
+    r"\b\d+(?:\.\d+)?\s*(?:eV|meV|kcal/mol|kJ/mol|Ha|Hartree|Bohr|Debye|nm|ps|ns|fs|Å|Angstrom)\b|"
+    r"\b\d+\.\d+\s*/\s*\d+\.\d+\s*=\s*\d+\.\d+\b)"
+)
 
 PRE_COMMIT_SCRIPT = """#!/bin/sh
 # Managed by Research Brain (rb) — deterministic out-of-model verification hook.
@@ -351,11 +378,19 @@ def lint_vault(vault_path: Path, target_files: list[Path] | None = None) -> list
                     )
 
         # 5. Colored LaTeX annotation check on displayed equations (outside fenced code blocks)
-        stripped_code = re.sub(r"(?ms)^```.*?^```|^~~~.*?^~~~", "", content)
-        for idx, m in enumerate(DISPLAY_MATH_RE.finditer(stripped_code), start=1):
+        is_wiki_page = (
+            in_vault
+            and len(rel.parts) >= 2
+            and rel.parts[0] == "wiki"
+            and md.name not in ("INDEX.md", "GARDEN_POLICY.md")
+        )
+        stripped_frontmatter = re.sub(r"\A---\n.*?\n---\n?", "", content, flags=re.DOTALL)
+        stripped_code = re.sub(r"(?ms)^```.*?^```|^~~~.*?^~~~", "", stripped_frontmatter)
+        display_matches = list(DISPLAY_MATH_RE.finditer(stripped_code))
+        for idx, m in enumerate(display_matches, start=1):
             eq_body = m.group("dollar") or m.group("env") or ""
             if eq_body.strip() and not COLOR_ANNOT_RE.search(eq_body):
-                sev = "error" if (in_vault and len(rel.parts) >= 2 and rel.parts[0] == "wiki") else "warn"
+                sev = "error" if is_wiki_page else "warn"
                 issues.append(
                     LintIssue(
                         md,
@@ -363,5 +398,58 @@ def lint_vault(vault_path: Path, target_files: list[Path] | None = None) -> list
                         f"Display equation #{idx} lacks colored LaTeX annotation (\\color / \\textcolor / \\eqnmarkbox); see rb-explain.",
                     )
                 )
+
+        # 6. Markdown Reference Table presence whenever math symbols or technical acronyms appear
+        has_math = bool(display_matches) or bool(INLINE_MATH_RE.search(stripped_code))
+        glossary_match = GLOSSARY_BLOCK_RE.search(stripped_code)
+        glossary_text = glossary_match.group(0) if glossary_match else ""
+        prose_no_glossary = GLOSSARY_BLOCK_RE.sub("", stripped_code)
+        # Strip provenance tags like [UNVERIFIED] before scanning acronyms
+        prose_for_acronyms = PROVENANCE_TAG_RE.sub("", prose_no_glossary)
+        prose_acronyms = {
+            m.group(1)
+            for m in ACRONYM_RE.finditer(prose_for_acronyms)
+            if m.group(1) not in COMMON_NON_DOMAIN_ACRONYMS
+        }
+
+        if (has_math or prose_acronyms) and not glossary_match:
+            sev = "error" if is_wiki_page else "warn"
+            issues.append(
+                LintIssue(
+                    md,
+                    sev,
+                    "Document uses math symbols or technical acronyms without a Markdown `## Reference Table` (symbols & terms); define every symbol and new idea before use (see rb-explain).",
+                )
+            )
+        elif prose_acronyms:
+            for acr in sorted(prose_acronyms):
+                in_ref = re.search(rf"\b{re.escape(acr)}\b", glossary_text) is not None
+                spelled_inline = re.search(rf"\(\s*{re.escape(acr)}\s*\)", prose_no_glossary) is not None
+                if not in_ref and not spelled_inline:
+                    sev = "error" if is_wiki_page else "warn"
+                    issues.append(
+                        LintIssue(
+                            md,
+                            sev,
+                            f"Acronym `{acr}` is neither defined in `## Reference Table` nor spelled out inline `(e.g., Full Name ({acr}))`.",
+                        )
+                    )
+
+        # 7. Quantitative claim provenance check (outside Reference Table & headings)
+        if md.name not in ("INDEX.md", "GARDEN_POLICY.md") and not md.name.endswith(".highlights.md"):
+            for para in re.split(r"\n\s*\n", prose_no_glossary):
+                p_strip = para.strip()
+                if not p_strip or p_strip.startswith("#") or p_strip.startswith("|") or p_strip.startswith("$$"):
+                    continue
+                if QUANT_CLAIM_RE.search(p_strip) and not PROVENANCE_TAG_RE.search(p_strip):
+                    sev = "error" if is_wiki_page else "warn"
+                    snippet = p_strip.splitlines()[0][:80]
+                    issues.append(
+                        LintIssue(
+                            md,
+                            sev,
+                            f"Quantitative claim lacks provenance tag ([@id, p.X] / [calc: ...] / [worklog: ...] / [example] / [UNVERIFIED]): {snippet!r}",
+                        )
+                    )
 
     return issues

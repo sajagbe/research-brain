@@ -143,29 +143,57 @@ def test_git_pre_commit_hook_blocks_fabricated_quote(tmp_path: Path, monkeypatch
     assert "hallucinated quote" not in proc.stderr or "Verbatim quote not found" in proc.stderr
 
 
-def test_lint_enforces_colored_latex_equation_annotations(tmp_path: Path) -> None:
+def test_lint_enforces_colored_latex_ref_table_acronyms_and_provenance(tmp_path: Path) -> None:
     vault = init_vault(tmp_path / "vault")
     src = tmp_path / "eq.txt"
     src.write_text("linear response equals trace of density and operator\n", encoding="utf-8")
     ingest_source(vault, src, source_id="eqsrc", area="general")
 
-    # Uncolored display equation in wiki/ must raise an error
-    uncolored = vault / "wiki" / "general" / "uncolored.md"
-    uncolored.write_text(
+    # Uncolored equation + missing Reference Table + unexplained acronyms (WHAM/MBAR/FCD) + uncited quantitative claim
+    bad_wiki = vault / "wiki" / "general" / "bad_explain.md"
+    bad_wiki.write_text(
         "---\nstatus: verified\n---\n\n"
         '> "linear response equals trace of density and operator" [@eqsrc, L.1]\n\n'
+        "Run FCD and reweight with WHAM and MBAR. True superexchange coupling is tiny: |H_eff| = 8.96 x 10^-7 eV and changes < 10%.\n\n"
         "$$\nT_p = -\\operatorname{Tr}(D_0 h_p)\n$$\n",
         encoding="utf-8",
     )
-    errors = [i for i in lint_vault(vault, target_files=[uncolored]) if i.severity == "error"]
-    assert any("colored LaTeX annotation" in e.message for e in errors)
+    errors = [i.message for i in lint_vault(vault, target_files=[bad_wiki]) if i.severity == "error"]
+    assert any("colored LaTeX annotation" in e for e in errors)
+    assert any("Reference Table" in e for e in errors)
+    assert any("Quantitative claim lacks provenance" in e for e in errors)
 
-    # Colored display equation passes cleanly
-    colored = vault / "wiki" / "general" / "colored.md"
-    colored.write_text(
+    # Has Reference Table, but still leaves MBAR undefined
+    missing_acr = vault / "wiki" / "general" / "missing_acr.md"
+    missing_acr.write_text(
         "---\nstatus: verified\n---\n\n"
+        "## Reference Table (Symbols & Terms)\n"
+        "| Symbol / Term | Color | Meaning | Units |\n"
+        "| :--- | :--- | :--- | :--- |\n"
+        "| **WHAM** | — | Weighted Histogram Analysis Method | — |\n\n"
         '> "linear response equals trace of density and operator" [@eqsrc, L.1]\n\n'
+        "Reweight frames with WHAM and MBAR [calc: run.py].\n",
+        encoding="utf-8",
+    )
+    acr_errors = [i.message for i in lint_vault(vault, target_files=[missing_acr]) if i.severity == "error"]
+    assert any("`MBAR`" in e for e in acr_errors)
+    assert not any("`WHAM`" in e for e in acr_errors)
+
+    # Fully compliant Markdown with Reference Table (symbols + acronyms), colored equation, and provenance passes cleanly
+    good_wiki = vault / "wiki" / "general" / "good_explain.md"
+    good_wiki.write_text(
+        "---\nstatus: verified\n---\n\n"
+        "# Linear Response\n\n"
+        "## Reference Table (Symbols & Terms)\n"
+        "| Symbol / Term | Color | Plain-English Physical / Operational Meaning | Units / Scope |\n"
+        "| :--- | :--- | :--- | :--- |\n"
+        "| $\\color{#1B3A5C}{T_p}$ | `#1B3A5C` | Frozen linear rate | Ha |\n"
+        "| $\\color{#00798C}{D_0}$ | `#00798C` | Equilibrium density matrix | electrons |\n"
+        "| **WHAM** | — | Weighted Histogram Analysis Method combining overlapping biased windows | binned histograms |\n"
+        "| **MBAR** | — | Multistate Bennett Acceptance Ratio (binless reweighting across windows) | unbinned samples |\n\n"
+        '> "linear response equals trace of density and operator" [@eqsrc, L.1]\n\n'
+        "We compare WHAM and MBAR; true superexchange coupling is tiny: $|H_{\\text{eff}}| = 8.96 \\times 10^{-7}$ eV (< 10% shift) [calc: scripts/coupling.py].\n\n"
         "$$\n\\color{#1B3A5C}{\\underbrace{T_p}_{\\text{linear rate}}} = -\\color{#C87D14}{\\operatorname{Tr}}(\\color{#00798C}{D_0}\\,\\color{#D1495B}{h_p})\n$$\n",
         encoding="utf-8",
     )
-    assert [i for i in lint_vault(vault, target_files=[colored]) if i.severity == "error"] == []
+    assert [i for i in lint_vault(vault, target_files=[good_wiki]) if i.severity == "error"] == []
