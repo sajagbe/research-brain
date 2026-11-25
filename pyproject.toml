@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "research-brain"
+version = "0.1.0"
+description = "Portable research organization, knowledge management, Lamport proof workflow, and deterministic citation verification for any coding agent."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pymupdf>=1.24.0,<2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[project.scripts]
+rb = "research_brain.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/research_brain"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
